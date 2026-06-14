@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="theme-color" content="#0f172a" />
+<title>CPaSS 利益計算</title>
+<style>
+  :root{ --bg:#0f172a; --card:#1e293b; --line:#334155; --txt:#e2e8f0; --mut:#94a3b8; --hint:#64748b;
+         --green:#10b981; --red:#f87171; --acc:#22c55e; --accbg:#14532d; }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif;
+       padding:16px;max-width:480px;margin:0 auto;font-size:16px;}
+  h1{font-size:18px;font-weight:600;margin:4px 0 14px;display:flex;align-items:center;gap:8px;}
+  .row{display:flex;align-items:center;gap:8px;margin-bottom:12px;}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;}
+  label{font-size:13px;color:var(--mut);display:block;}
+  input{width:100%;margin-top:5px;background:var(--card);border:1px solid var(--line);border-radius:10px;
+        color:var(--txt);font-size:18px;padding:11px 12px;outline:none;}
+  input:focus{border-color:var(--acc);}
+  #ttm{width:96px;margin-top:0;font-size:16px;padding:8px 10px;}
+  .modes{display:flex;gap:6px;margin-bottom:16px;}
+  .modes button{flex:1;background:var(--card);border:1px solid var(--line);border-radius:10px;color:var(--mut);
+        font-size:13px;padding:11px 4px;cursor:pointer;font-weight:600;}
+  .modes button.on{background:var(--accbg);border-color:var(--acc);color:#bbf7d0;}
+  .result{background:var(--card);border-radius:14px;padding:16px 18px;margin-bottom:14px;}
+  .result .lab{font-size:13px;color:var(--mut);}
+  #profit{font-size:34px;font-weight:700;line-height:1.15;margin:2px 0;}
+  #margin{font-size:13px;color:var(--mut);}
+  .bd{font-size:14px;}
+  .bd .r{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line);}
+  .bd .r span:first-child{color:var(--mut);}
+  .bd .r.total{font-weight:700;border-bottom:none;padding-top:10px;}
+  .hint{font-size:11px;color:var(--hint);margin-top:14px;line-height:1.6;}
+</style>
+</head>
+<body>
+  <h1>💰 CPaSS 利益計算</h1>
+  <div class="row">
+    <span style="font-size:13px;color:var(--mut);">為替 ¥/$</span>
+    <input id="ttm" type="number" inputmode="decimal" value="152" />
+    <button id="rateBtn" style="background:var(--card);border:1px solid var(--line);border-radius:8px;color:var(--mut);font-size:12px;padding:9px 10px;cursor:pointer;white-space:nowrap;">🔄 自動</button>
+    <span id="rateStat" style="font-size:11px;color:var(--hint);"></span>
+  </div>
+  <div class="grid">
+    <label>仕入 ¥<input id="cost" type="number" inputmode="numeric" placeholder="0" /></label>
+    <label>売値 $<input id="usd" type="number" inputmode="decimal" placeholder="0" /></label>
+    <label>徴収送料 $<input id="shipUsd" type="number" inputmode="decimal" placeholder="0" /></label>
+    <label>送料 ¥<input id="ship" type="number" inputmode="numeric" placeholder="0" /></label>
+  </div>
+  <div class="modes" id="modes">
+    <button data-mode="cpass">CPaSS</button>
+    <button data-mode="airpacket">エアパケット</button>
+    <button data-mode="direct">直接取引</button>
+  </div>
+  <div class="result">
+    <div class="lab">利益</div>
+    <div id="profit">—</div>
+    <div id="margin">売値$と仕入¥を入力</div>
+  </div>
+  <div class="bd" id="bd"></div>
+  <div class="hint">
+    CPaSS: 手数料19% / 広告2% / 送料¥ = max(1,700, 1559 + 売値円×0.1024)<br>
+    エアパケット: 手数料19% / 広告2% / 送料¥1,200（編集可）<br>
+    直接取引: 手数料4% / 広告0% / 送料¥は手入力<br>
+    利益 = (売値$ + 徴収送料$)×(1−手数料%−広告%)×為替 − 仕入¥ − 送料¥
+  </div>
+<script>
+(function(){
+  var MODES={cpass:{fe:19,fa:2,ship:'auto'},airpacket:{fe:19,fa:2,ship:1200},direct:{fe:4,fa:0,ship:0}};
+  var cur=localStorage.getItem('cpass_mode')||'cpass';
+  var savedTtm=localStorage.getItem('cpass_ttm'); if(savedTtm) document.getElementById('ttm').value=savedTtm;
+  function $(id){return document.getElementById(id);}
+  function num(id){return parseFloat($(id).value)||0;}
+  function calcCpass(usd,ttm){return Math.max(1700,Math.round(1559+(usd*ttm)*0.1024));}
+  function savedShip(mode){var v=localStorage.getItem('cpass_ship_'+mode);return (v!==null&&v!=='')?parseFloat(v):MODES[mode].ship;}
+  function setShipDefault(){var m=MODES[cur];$('ship').value=(m.ship==='auto')?calcCpass(num('usd'),num('ttm')):savedShip(cur);}
+  function paint(){var bs=document.querySelectorAll('#modes button');for(var i=0;i<bs.length;i++){bs[i].className=(bs[i].getAttribute('data-mode')===cur)?'on':'';}}
+  function fetchRate(){var st=$('rateStat');st.textContent='取得中…';
+    fetch('https://open.er-api.com/v6/latest/USD').then(function(r){return r.json();}).then(function(j){
+      var jpy=j&&j.rates&&j.rates.JPY;if(!jpy)throw 0;
+      $('ttm').value=Math.round(jpy*100)/100;localStorage.setItem('cpass_ttm',$('ttm').value);
+      st.textContent='自動 '+(j.time_last_update_utc?new Date(j.time_last_update_utc).toLocaleDateString('ja-JP'):'');
+      if(cur==='cpass')setShipDefault();recalc();
+    }).catch(function(){
+      fetch('https://api.frankfurter.app/latest?from=USD&to=JPY').then(function(r){return r.json();}).then(function(j){
+        var jpy=j&&j.rates&&j.rates.JPY;if(!jpy)throw 0;
+        $('ttm').value=Math.round(jpy*100)/100;localStorage.setItem('cpass_ttm',$('ttm').value);
+        st.textContent='自動 '+(j.date||'');if(cur==='cpass')setShipDefault();recalc();
+      }).catch(function(){st.textContent='取得失敗（手入力でOK）';});
+    });
+  }
+  function recalc(){
+    var cost=num('cost'),usd=num('usd'),shipUsd=num('shipUsd'),ttm=num('ttm'),ship=num('ship'),m=MODES[cur];
+    var pe=$('profit'),me=$('margin'),bd=$('bd');
+    localStorage.setItem('cpass_ttm',$('ttm').value);
+    if(!cost||!usd){pe.textContent='—';pe.style.color='var(--txt)';me.textContent='売値$と仕入¥を入力';bd.innerHTML='';return;}
+    var gross=(usd+shipUsd)*ttm, fee=gross*m.fe/100, ad=gross*m.fa/100, net=gross-fee-ad;
+    var profit=Math.round(net-cost-ship), margin=cost>0?profit/cost*100:0, pos=profit>0;
+    pe.textContent=(pos?'+':'')+'¥'+profit.toLocaleString();
+    pe.style.color=pos?'var(--green)':'var(--red)';
+    me.textContent='利益率 '+margin.toFixed(1)+'%（対原価） · 手数料'+m.fe+'%+広告'+m.fa+'% · ¥'+ttm+'/$';
+    function r(l,v,neg,tot){return '<div class="r'+(tot?' total':'')+'"><span>'+l+'</span><span style="color:'+(tot?(pos?'var(--green)':'var(--red)'):'var(--txt)')+'">'+(neg?'−':'')+'¥'+Math.round(Math.abs(v)).toLocaleString()+'</span></div>';}
+    bd.innerHTML=r('売上（売値+徴収送料）',gross)+r('eBay手数料 '+m.fe+'%',fee,true)+r('広告 '+m.fa+'%',ad,true)+r('入金（net）',net)+r('送料',ship,true)+r('仕入（原価）',cost,true)+r('利益',profit,false,true);
+  }
+  $('rateBtn').addEventListener('click',fetchRate);
+  document.querySelectorAll('#modes button').forEach(function(b){b.addEventListener('click',function(){cur=b.getAttribute('data-mode');localStorage.setItem('cpass_mode',cur);setShipDefault();paint();recalc();});});
+  ['cost','usd','shipUsd','ship','ttm'].forEach(function(id){$(id).addEventListener('input',function(){
+    if(id==='ship'&&MODES[cur].ship!=='auto')localStorage.setItem('cpass_ship_'+cur,$('ship').value);
+    if((id==='usd'||id==='ttm')&&cur==='cpass')setShipDefault();
+    recalc();
+  });});
+  setShipDefault();paint();recalc();
+  fetchRate();
+})();
+</script>
+</body>
+</html>
