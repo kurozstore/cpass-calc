@@ -55,6 +55,21 @@
     <button data-mode="airpacket">エアパケット</button>
     <button data-mode="direct">直接取引</button>
   </div>
+  <div class="grid">
+    <label>手数料 %<input id="fee" type="number" inputmode="decimal" placeholder="0" /></label>
+    <label>広告 %<input id="ad" type="number" inputmode="decimal" placeholder="0" /></label>
+  </div>
+  <details id="feeDetails" style="margin-bottom:12px;">
+    <summary style="font-size:12px;color:var(--mut);cursor:pointer;padding:4px 2px;">▸ 手数料の内訳で出す（落札+海外→手数料%／決済は固定$）</summary>
+    <div class="grid" style="margin-top:8px;grid-template-columns:1fr 1fr 1fr;">
+      <label><span id="lblFvf">落札</span> %<input id="feeFvf" type="number" inputmode="decimal" placeholder="0" /></label>
+      <label><span id="lblIntl">海外</span> %<input id="feeIntl" type="number" inputmode="decimal" placeholder="0" /></label>
+      <label><span id="lblFix">決済固定</span> $<input id="feeFixed" type="number" inputmode="decimal" placeholder="0" /></label>
+    </div>
+  </details>
+  <div class="row" style="justify-content:flex-end;margin-bottom:14px;">
+    <button id="resetBtn" style="background:var(--card);border:1px solid var(--line);border-radius:8px;color:var(--mut);font-size:12px;padding:8px 12px;cursor:pointer;">↩︎ このタブを初期値に戻す</button>
+  </div>
   <div class="result">
     <div class="lab">利益</div>
     <div id="profit">—</div>
@@ -62,14 +77,16 @@
   </div>
   <div class="bd" id="bd"></div>
   <div class="hint">
-    CPaSS: 手数料19% / 広告2% / 送料¥ = max(1,700, 1559 + 売値円×0.1024)<br>
-    エアパケット: 手数料19% / 広告2% / 送料¥1,200（編集可）<br>
-    直接取引: 手数料4% / 広告0% / 送料¥は手入力<br>
-    利益 = (売値$ + 徴収送料$)×(1−手数料%−広告%)×為替 − 仕入¥ − 送料¥
+    手数料%・広告%・送料¥・内訳は<b>タブごとに編集→自動保存</b>（次回も保持）。「↩︎初期値に戻す」で現タブをリセット。<br>
+    初期値 — CPaSS: 19% / 2% / 送料¥=max(1,700, 1559+売値円×0.1024)<br>
+    エアパケット: 19% / 2% / 送料¥1,200<br>
+    直接取引: <b>12%</b>（PayPal6% + 関税折半6%）/ 0% / 送料¥手入力<br>
+    「▸内訳」で 落札+海外（直接取引は PayPal+関税折半）を入れると手数料%へ自動合算。決済固定$は別途差引。<br>
+    利益 = (売値$+徴収送料$)×(1−手数料%−広告%)×為替 − 決済固定$×為替 − 仕入¥ − 送料¥
   </div>
 <script>
 (function(){
-  var MODES={cpass:{fe:19,fa:2,ship:'auto'},airpacket:{fe:19,fa:2,ship:1200},direct:{fe:4,fa:0,ship:0}};
+  var MODES={cpass:{fe:19,fa:2,ship:'auto',fvf:19,intl:0,fix:0},airpacket:{fe:19,fa:2,ship:1200,fvf:19,intl:0,fix:0},direct:{fe:12,fa:0,ship:0,fvf:6,intl:6,fix:0}};
   var cur=localStorage.getItem('cpass_mode')||'cpass';
   var savedTtm=localStorage.getItem('cpass_ttm'); if(savedTtm) document.getElementById('ttm').value=savedTtm;
   function $(id){return document.getElementById(id);}
@@ -77,6 +94,12 @@
   function calcCpass(usd,ttm){return Math.max(1700,Math.round(1559+(usd*ttm)*0.1024));}
   function savedShip(mode){var v=localStorage.getItem('cpass_ship_'+mode);return (v!==null&&v!=='')?parseFloat(v):MODES[mode].ship;}
   function setShipDefault(){var m=MODES[cur];$('ship').value=(m.ship==='auto')?calcCpass(num('usd'),num('ttm')):savedShip(cur);}
+  function savedFee(mode){var v=localStorage.getItem('cpass_fee_'+mode);return (v!==null&&v!=='')?parseFloat(v):MODES[mode].fe;}
+  function savedAd(mode){var v=localStorage.getItem('cpass_ad_'+mode);return (v!==null&&v!=='')?parseFloat(v):MODES[mode].fa;}
+  function setFeeDefault(){$('fee').value=savedFee(cur);$('ad').value=savedAd(cur);}
+  function savedSub(mode,key){var v=localStorage.getItem('cpass_'+key+'_'+mode);return (v!==null&&v!=='')?parseFloat(v):MODES[mode][key];}
+  function setSubDefault(){$('feeFvf').value=savedSub(cur,'fvf');$('feeIntl').value=savedSub(cur,'intl');$('feeFixed').value=savedSub(cur,'fix');
+    var dir=(cur==='direct');$('lblFvf').textContent=dir?'PayPal':'落札';$('lblIntl').textContent=dir?'関税折半':'海外';}
   function paint(){var bs=document.querySelectorAll('#modes button');for(var i=0;i<bs.length;i++){bs[i].className=(bs[i].getAttribute('data-mode')===cur)?'on':'';}}
   function fetchRate(){var st=$('rateStat');st.textContent='取得中…';
     fetch('https://open.er-api.com/v6/latest/USD').then(function(r){return r.json();}).then(function(j){
@@ -93,26 +116,31 @@
     });
   }
   function recalc(){
-    var cost=num('cost'),usd=num('usd'),shipUsd=num('shipUsd'),ttm=num('ttm'),ship=num('ship'),m=MODES[cur];
+    var cost=num('cost'),usd=num('usd'),shipUsd=num('shipUsd'),ttm=num('ttm'),ship=num('ship'),fe=num('fee'),fa=num('ad'),fx=num('feeFixed');
     var pe=$('profit'),me=$('margin'),bd=$('bd');
     localStorage.setItem('cpass_ttm',$('ttm').value);
     if(!cost||!usd){pe.textContent='—';pe.style.color='var(--txt)';me.textContent='売値$と仕入¥を入力';bd.innerHTML='';return;}
-    var gross=(usd+shipUsd)*ttm, fee=gross*m.fe/100, ad=gross*m.fa/100, net=gross-fee-ad;
+    var gross=(usd+shipUsd)*ttm, fee=gross*fe/100, ad=gross*fa/100, fixed=fx*ttm, net=gross-fee-ad-fixed;
     var profit=Math.round(net-cost-ship), margin=cost>0?profit/cost*100:0, pos=profit>0;
     pe.textContent=(pos?'+':'')+'¥'+profit.toLocaleString();
     pe.style.color=pos?'var(--green)':'var(--red)';
-    me.textContent='利益率 '+margin.toFixed(1)+'%（対原価） · 手数料'+m.fe+'%+広告'+m.fa+'% · ¥'+ttm+'/$';
+    me.textContent='利益率 '+margin.toFixed(1)+'%（対原価） · 手数料'+fe+'%+広告'+fa+'% · ¥'+ttm+'/$';
     function r(l,v,neg,tot){return '<div class="r'+(tot?' total':'')+'"><span>'+l+'</span><span style="color:'+(tot?(pos?'var(--green)':'var(--red)'):'var(--txt)')+'">'+(neg?'−':'')+'¥'+Math.round(Math.abs(v)).toLocaleString()+'</span></div>';}
-    bd.innerHTML=r('売上（売値+徴収送料）',gross)+r('eBay手数料 '+m.fe+'%',fee,true)+r('広告 '+m.fa+'%',ad,true)+r('入金（net）',net)+r('送料',ship,true)+r('仕入（原価）',cost,true)+r('利益',profit,false,true);
+    bd.innerHTML=r('売上（売値+徴収送料）',gross)+r('手数料 '+fe+'%',fee,true)+r('広告 '+fa+'%',ad,true)+(fx>0?r('決済固定 $'+fx,fixed,true):'')+r('入金（net）',net)+r('送料',ship,true)+r('仕入（原価）',cost,true)+r('利益',profit,false,true);
   }
   $('rateBtn').addEventListener('click',fetchRate);
-  document.querySelectorAll('#modes button').forEach(function(b){b.addEventListener('click',function(){cur=b.getAttribute('data-mode');localStorage.setItem('cpass_mode',cur);setShipDefault();paint();recalc();});});
-  ['cost','usd','shipUsd','ship','ttm'].forEach(function(id){$(id).addEventListener('input',function(){
+  document.querySelectorAll('#modes button').forEach(function(b){b.addEventListener('click',function(){cur=b.getAttribute('data-mode');localStorage.setItem('cpass_mode',cur);setShipDefault();setFeeDefault();setSubDefault();paint();recalc();});});
+  ['cost','usd','shipUsd','ship','ttm','fee','ad','feeFvf','feeIntl','feeFixed'].forEach(function(id){$(id).addEventListener('input',function(){
     if(id==='ship'&&MODES[cur].ship!=='auto')localStorage.setItem('cpass_ship_'+cur,$('ship').value);
+    if(id==='fee')localStorage.setItem('cpass_fee_'+cur,$('fee').value);
+    if(id==='ad')localStorage.setItem('cpass_ad_'+cur,$('ad').value);
+    if(id==='feeFvf'||id==='feeIntl'){var k=(id==='feeFvf')?'fvf':'intl';localStorage.setItem('cpass_'+k+'_'+cur,$(id).value);var nf=num('feeFvf')+num('feeIntl');$('fee').value=nf;localStorage.setItem('cpass_fee_'+cur,nf);}
+    if(id==='feeFixed')localStorage.setItem('cpass_fix_'+cur,$('feeFixed').value);
     if((id==='usd'||id==='ttm')&&cur==='cpass')setShipDefault();
     recalc();
   });});
-  setShipDefault();paint();recalc();
+  $('resetBtn').addEventListener('click',function(){['fee','ad','ship','fvf','intl','fix'].forEach(function(k){localStorage.removeItem('cpass_'+k+'_'+cur);});setShipDefault();setFeeDefault();setSubDefault();recalc();});
+  setShipDefault();setFeeDefault();setSubDefault();paint();recalc();
   fetchRate();
 })();
 </script>
